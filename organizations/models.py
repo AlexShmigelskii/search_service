@@ -1,4 +1,9 @@
 from django.db import models
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
 
 # Класс модели для представления организации.
 class Organization(models.Model):
@@ -13,6 +18,8 @@ class Organization(models.Model):
     # ИНН (Идентификационный номер налогоплательщика) организации (максимальная длина - 12 символов).
     inn = models.CharField(max_length=12)
 
+    search_vector = models.TextField(null=True, blank=True)
+
     def __str__(self):
         # Метод для представления объекта модели в виде строки (в данном случае, используется полное название).
         return self.full_name
@@ -22,3 +29,14 @@ class Organization(models.Model):
         # app_label указывает, к какому приложению относится модель (в данном случае, 'organizations').
         app_label = 'organizations'
 
+        indexes = [
+            GinIndex(fields=['full_name'], name='full_name_gin_idx'),
+            GinIndex(fields=['short_name'], name='short_name_gin_idx'),
+        ]
+
+
+# Создаем обработчик сигнала для post_save
+@receiver(post_save, sender=Organization)
+def update_search_vector(sender, instance, **kwargs):
+    instance.search_vector = SearchVector('full_name', 'short_name')
+    instance.save()

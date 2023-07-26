@@ -1,4 +1,6 @@
 from django.shortcuts import render
+from django.contrib.postgres.search import SearchVector, SearchRank
+from django.db.models import F
 from .models import Organization
 
 
@@ -8,8 +10,9 @@ def home_view(request):
 
     GET-запрос:
     - Извлекаем поисковый запрос из параметров запроса.
-    - Используем поле full_name и short_name для полнотекстового поиска организаций, соответствующих запросу.
-    - Сортируем результаты сначала по полю full_name, а затем по полю inn.
+    - Используем SearchVector для выполнения полнотекстового поиска по полям full_name и short_name.
+    - Используем SearchRank для определения релевантности результатов поиска.
+    - Сортируем результаты по убыванию релевантности (ранку полнотекстового поиска) и по полному наименованию.
 
     :param request: HTTP-запрос, который содержит поисковый запрос.
     :return: Возвращает HTML-страницу 'home.html' с результатами поиска и поисковым запросом.
@@ -18,12 +21,16 @@ def home_view(request):
         # Получаем поисковый запрос из параметров запроса.
         query = request.GET.get('search_query', '')
 
-        # Используем поле full_name и short_name для полнотекстового поиска организаций, соответствующих запросу.
-        results = Organization.objects.filter(full_name__icontains=query) | Organization.objects.filter(
-            short_name__icontains=query)
+        # Используем SearchVector для выполнения полнотекстового поиска по полям full_name и short_name.
+        vector = SearchVector('full_name', 'short_name')
+        results = Organization.objects.annotate(search=vector).filter(search=query)
 
-        # Сортируем результаты сначала по полю full_name, а затем по полю inn.
-        results = results.order_by('full_name', 'inn')
+        # Используем SearchRank для определения релевантности результатов поиска.
+        rank = SearchRank(vector, query)
+        results = results.annotate(rank=rank)
+
+        # Сортируем результаты по убыванию релевантности (ранку полнотекстового поиска) и по полному наименованию.
+        results = results.order_by('-rank', F('full_name'))
 
         # Возвращаем HTML-страницу 'home.html' с результатами поиска и поисковым запросом.
         return render(request, 'home.html', {'results': results, 'search_query': query})
