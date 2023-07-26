@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from django.contrib.postgres.search import SearchVector, SearchRank
-from django.db.models import F
+from django.db.models import F, Q
 from .models import Organization
 
 
@@ -12,7 +12,8 @@ def home_view(request):
     - Извлекаем поисковый запрос из параметров запроса.
     - Используем SearchVector для выполнения полнотекстового поиска по полям full_name и short_name.
     - Используем SearchRank для определения релевантности результатов поиска.
-    - Сортируем результаты по убыванию релевантности (ранку полнотекстового поиска) и по полному наименованию.
+    - Используем __icontains для выполнения частичного поиска по полям full_name и short_name.
+    - Объединяем результаты полнотекстового поиска и частичного поиска в Python коде.
 
     :param request: HTTP-запрос, который содержит поисковый запрос.
     :return: Возвращает HTML-страницу 'home.html' с результатами поиска и поисковым запросом.
@@ -23,14 +24,23 @@ def home_view(request):
 
         # Используем SearchVector для выполнения полнотекстового поиска по полям full_name и short_name.
         vector = SearchVector('full_name', 'short_name')
-        results = Organization.objects.annotate(search=vector).filter(search=query)
+        results_full_text = Organization.objects.annotate(search=vector).filter(search=query)
 
-        # Используем SearchRank для определения релевантности результатов поиска.
+        # Используем SearchRank для определения релевантности результатов полнотекстового поиска.
         rank = SearchRank(vector, query)
-        results = results.annotate(rank=rank)
+        results_full_text = results_full_text.annotate(rank=rank)
 
-        # Сортируем результаты по убыванию релевантности (ранку полнотекстового поиска) и по полному наименованию.
-        results = results.order_by('-rank', F('full_name'))
+        # Используем __icontains для выполнения частичного поиска по полям full_name и short_name.
+        results_partial_text = Organization.objects.filter(
+            Q(full_name__icontains=query) | Q(short_name__icontains=query)
+        )
+
+        # Объединяем результаты полнотекстового поиска и частичного поиска в Python коде and remove duplicates.
+        results = list(results_full_text) + list(results_partial_text)
+        results = sorted(results, key=lambda x: x.rank if hasattr(x, 'rank') and x.rank else float('-inf'))
+
+        # Use a set to remove duplicates
+        unique_results = list(set(results))
 
         # Возвращаем HTML-страницу 'home.html' с результатами поиска и поисковым запросом.
-        return render(request, 'home.html', {'results': results, 'search_query': query})
+        return render(request, 'home.html', {'results': unique_results, 'search_query': query})
